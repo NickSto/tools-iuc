@@ -397,16 +397,22 @@ def createTableHDwithTags(list1):
 
 
 def createFileHD(summary, sumCol, overallSum, output_file, name, sep):
+    ## Seems this creates all the tables with column labels 'FS=[x]'.
+    ## `summary` is created by `createTableHD()`.
     output_file.write(name)
     output_file.write("\n")
-    output_file.write("{}FS=1{}FS=2{}FS=3{}FS=4{}FS=5-10{}FS>10{}sum{}\n".format(sep, sep, sep, sep, sep, sep, sep, sep))
+    output_file.write(sep.join(('', 'FS=1', 'FS=2', 'FS=3', 'FS=4', 'FS=5-10', 'FS>10', 'sum', '\n')))
     for item in summary:
+        ## `item` seems to be the row of values.
         for nr in item:
+            ## `nr` seems to be the data point. I guess each is a string.
+            ## Includes the 'HD=[0-9]+' column.
             if "HD" not in nr and "diff" not in nr:
                 nr = nr.astype(float)
                 nr = nr.astype(int)
             output_file.write("{}{}".format(nr, sep))
         output_file.write("\n")
+    ## Print the `sum` line at the bottom.
     output_file.write("sum{}".format(sep))
     sumCol = map(int, sumCol)
     for el in sumCol:
@@ -435,10 +441,28 @@ def createFileHDwithinTag(summary, sumCol, overallSum, output_file, name, sep):
 
 
 def hamming(array1, array2):
+    ## This takes two arrays of barcodes (simple strings), compares each one in array1 to every
+    ## one in array2, finding the minimum hamming distance for it.
+    ## It returns an array of length `len(array1)`, where each element is the minimum hamming
+    ## distance for the corresponding barcode in `array1`.
+    ## `numpy.ones(l)` returns an array of `l` 1's.
+    ## Here they're just multiplying them by 99 to get an array that just consists of the number
+    ## 99 repeated as many times as there are elements in `array1`.
     res = 99 * numpy.ones(len(array1))
     i = 0
+    ## "Returns the sorted unique elements of an array."
     array2 = numpy.unique(array2)  # remove duplicate sequences to decrease running time
     for a in array1:
+        ## This bit gets a little "you are not expected to understand this".
+        ## `a` and `b` are each just a single barcode str.
+        ## So `itertools.imap(operator.ne, a, b)` applies `operator.ne()` to each *character* in
+        ## `a` and `b`, meaning it compares the first base in barcode `a` to the first base in
+        ## barcode `b`, then it compares the second bases in barcodes `a` and `b`, etc.
+        ## (more specifically, it returns (a[0] != b[0], a[1] != b[1], ... a[-1] != b[-1])).
+        ## So the return value is a sequence of True/False values, which `sum()` adds up, giving
+        ## the total number of mismatches.
+        ## Importantly, this means the hamming distance calculation doesn't do any alignment or
+        ## account for indels at all.
         dist = numpy.array([sum(itertools.imap(operator.ne, a, b)) for b in array2])  # fastest
         res[i] = numpy.amin(dist[dist > 0])  # pick min distance greater than zero
         # print(i)
@@ -635,6 +659,8 @@ def familySizeDistributionWithHD(fs, ham, diff=False, rel=True):
 
 def make_argparser():
     parser = argparse.ArgumentParser(description='Hamming distance analysis of duplex sequencing data')
+    ## The format of the input file seems to be 3 columns: count, barcode, and order.
+    ## E.g. the output of $ cut -f 1,2 families.tsv | uniq -c | awk -v OFS='\t' '{print $1, $2, $3}'
     parser.add_argument('--inputFile',
                         help='Tabular File with three columns: ab or ba, tag and family size.')
     parser.add_argument('--inputName1')
@@ -732,9 +758,16 @@ def Hamming_Distance_Analysis(argv):
     # for f, name_file, pdf_f, csv_f in zip(files, names, pdf_files, csv_files):
     with open(title_savedFile_csv, "w") as output_file, PdfPages(title_savedFile_pdf) as pdf:
         print("dataset: ", name1)
+        ## `integers` is a 1D numpy array (a list, lol) of the 1st column of the input file.
+        ## `data_array` is a 2D array of the raw string values of the input file (3 columns wide and
+        ## as many rows as there are lines).
         integers, data_array = readFileReferenceFree(file1)
+        ## unnecessary?
         data_array = numpy.array(data_array)
+        ## This creates another variable equal to `integers` (I checked).
+        ## The `[:, 0]` notation means select all rows, but only the first column.
         int_f = numpy.array(data_array[:, 0]).astype(int)
+        ## Filter by family size (`minFS`).
         data_array = data_array[numpy.where(int_f >= minFS)]
         integers = integers[integers >= minFS]
 
@@ -801,6 +834,7 @@ def Hamming_Distance_Analysis(argv):
         #     pickle.dump(result, o, pickle.HIGHEST_PROTOCOL)
 
         # comparison random tags to whole dataset
+        ## `result1` is the subsampled set of tags (1000 by default).
         result1 = data_array[result, 1]  # random tags
         result2 = data_array[:, 1]  # all tags
         print("size of the whole dataset= ", len(result2))
@@ -808,10 +842,14 @@ def Hamming_Distance_Analysis(argv):
 
         # HD analysis of whole tag
         proc_pool = Pool(nproc)
+        ## Split `result1` into `nproc` chunks to distribute to the workers.
         chunks_sample = numpy.array_split(result1, nproc)
+        ## Have each worker execute `hamming(chunkX, result2)` where `chunkX` is one of the arrays
+        ## in `chunks_sample`.
         ham = proc_pool.map(partial(hamming, array2=result2), chunks_sample)
         proc_pool.close()
         proc_pool.join()
+        ## Join the results of the workers back into one array.
         ham = numpy.concatenate(ham).astype(int)
         # with open("HD_whole dataset_{}.txt".format(app_f), "w") as output_file1:
         # for h, tag in zip(ham, result1):
@@ -956,6 +994,7 @@ def Hamming_Distance_Analysis(argv):
             numpy.concatenate(list1)), lenTags, lenTags))
 
         # HD
+        ## `summary` comes from `createTableHD()` above.
         createFileHD(summary, sumCol, overallSum, output_file,
                      "Hamming distance separated by family size", sep)
         # FSD
